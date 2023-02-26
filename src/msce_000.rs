@@ -1,12 +1,13 @@
 use std::{
     collections::HashMap,
     io::{Read, Seek, Write},
+    ops::Deref,
     path::PathBuf,
 };
 
 use crate::strings::WinNullString;
 use binrw::{binrw, BinRead, BinResult, BinWrite, Endian, VecArgs};
-use derive_more::Into;
+use derive_more::Deref;
 
 #[binrw]
 #[brw(little)]
@@ -18,11 +19,11 @@ pub struct MSCE000 {
     pub provider: WinNullString,
     #[brw(pad_size_to = header.length_unsupported)]
     pub unsupported: WinNullString,
-    #[br(count = header.num_entries_strings)]
+    #[br(count = header.num_entries_strings, postprocess_now)]
     pub strings: SharedStrings,
-    #[br(args { inner: (strings.clone(),), count: header.num_entries_dirs.into()})]
+    #[br(args { inner: (&strings,), count: header.num_entries_dirs.into()}, postprocess_now)]
     pub directories: DirectoryEntries,
-    #[br(args { inner: (directories.clone(),), count: header.num_entries_files.into()})]
+    #[br(args { inner: (&directories,), count: header.num_entries_files.into()})]
     pub files: Vec<FileEntry>,
     #[br(count = header.num_entries_reg_hives)]
     pub reg_hives: Vec<RegHiveEntry>,
@@ -86,7 +87,7 @@ pub struct StringEntry {
     pub string: WinNullString,
 }
 
-#[derive(Into, Clone)]
+#[derive(Deref)]
 pub struct SharedStrings(HashMap<u16, String>);
 
 impl BinRead for SharedStrings {
@@ -121,11 +122,11 @@ impl BinWrite for SharedStrings {
     }
 }
 
-#[derive(Into, Clone)]
+#[derive(Deref)]
 pub struct DirectoryEntries(HashMap<u16, String>);
 
 impl BinRead for DirectoryEntries {
-    type Args<'a> = VecArgs<(SharedStrings,)>;
+    type Args<'a> = VecArgs<(&'a SharedStrings,)>;
 
     fn read_options<R: Read + Seek>(
         reader: &mut R,
@@ -135,7 +136,7 @@ impl BinRead for DirectoryEntries {
         let count = args.count;
         let mut hm = HashMap::with_capacity(count);
         for _ in 0..count {
-            let entry = DirectoryEntry::read_options(reader, endian, args.inner.clone())?;
+            let entry = DirectoryEntry::read_options(reader, endian, args.inner)?;
             hm.insert(entry.id, entry.path);
         }
         Ok(Self(hm))
@@ -158,7 +159,7 @@ impl BinWrite for DirectoryEntries {
 
 #[binrw]
 #[brw(little)]
-#[br(import(strings: SharedStrings))]
+#[br(import(strings: &SharedStrings))]
 pub struct DirectoryEntry {
     pub id: u16,
     pub spec_length: u16,
@@ -166,9 +167,9 @@ pub struct DirectoryEntry {
     pub specs: Vec<u16>,
     #[br(calc = specs.iter()
         .filter_map(|string_id| {
-            let hm = <HashMap<u16, String>>::from(strings.clone());
-            hm.get(string_id).cloned()
+            strings.deref().get(string_id)
         })
+        .cloned()
         .collect()
     )]
     #[bw(ignore)]
@@ -177,7 +178,7 @@ pub struct DirectoryEntry {
 
 #[binrw]
 #[brw(little)]
-#[br(import(diretories: DirectoryEntries))]
+#[br(import(diretories: &DirectoryEntries))]
 pub struct FileEntry {
     pub id: u16,
     pub directory_id: u16,
@@ -187,8 +188,7 @@ pub struct FileEntry {
     #[brw(pad_size_to = name_length.clone())]
     pub name: WinNullString,
     #[br(calc = (|| {
-        let hm = <HashMap<u16, String>>::from(diretories.clone());
-        let mut path = match hm.get(&directory_id) {
+        let mut path = match diretories.deref().get(&directory_id) {
             Some(path) => PathBuf::from(path),
             _ => PathBuf::new()
         };
