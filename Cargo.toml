@@ -12,3 +12,6 @@ cab = "0.4.1"
 clap = { version = "4.1.6", features = ["derive"] }
 derive_more = "0.99.17"
 encoding_rs = "0.8.32"
+filetime = "0.2.20"
+once_cell = "1.17.1"
+time = "0.3.20"
