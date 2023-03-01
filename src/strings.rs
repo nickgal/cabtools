@@ -17,7 +17,8 @@ impl BinRead for WinNullString {
         let null_string = NullString::read_options(reader, endian, ())?;
         let null_string_bytes = <Vec<u8>>::from(null_string);
         let win_string = WINDOWS_1252.decode(&null_string_bytes).0.to_string();
-        return Ok(Self(win_string));
+
+        Ok(Self(win_string))
     }
 }
 

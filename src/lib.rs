@@ -38,14 +38,19 @@ static CE_DIRS: Lazy<HashMap<&str, &str>> = Lazy::new(|| {
     m
 });
 
-pub fn read_cab(name: &str) -> Cabinet<File> {
-    let cab_file = File::open(name).unwrap();
+pub fn read_cab(path: PathBuf) -> Cabinet<File> {
+    let cab_file = File::open(path).unwrap();
     Cabinet::new(cab_file).unwrap()
 }
 
 pub trait CECabinet {
     fn find_000_manifest(&self) -> Option<&FileEntry>;
     fn read_000_manifest(&self) -> MSCE000;
+    fn extract_files<P: Into<PathBuf>>(
+        &mut self,
+        file_entries: &[WinCECabFileEntry],
+        output_path: P,
+    );
 }
 
 impl<R: Read + Seek> CECabinet for Cabinet<R> {
@@ -66,6 +71,43 @@ impl<R: Read + Seek> CECabinet for Cabinet<R> {
             .expect("Failed to locate .000 manifest.");
         let mut file = File::open(manifest.name()).unwrap();
         MSCE000::read(&mut file).unwrap()
+    }
+
+    fn extract_files<P: Into<PathBuf>>(
+        &mut self,
+        file_entries: &[WinCECabFileEntry],
+        output_path: P,
+    ) {
+        let base_path: PathBuf = output_path.into();
+
+        for file_entry in file_entries {
+            let mut reader = self.read_file(&file_entry.cab_filename).unwrap();
+            let mut output_filepath = PathBuf::from(&base_path);
+
+            let should_expand_ce_variables = true;
+            let destination = if should_expand_ce_variables {
+                expand_ce_variables(&file_entry.destination).to_string()
+            } else {
+                file_entry.destination.to_string()
+            };
+
+            output_filepath.push(destination);
+
+            println!(
+                "Extracting {} ({} B Compression {:?}) to {}",
+                file_entry.cab_filename,
+                file_entry.file_size,
+                file_entry.compression,
+                output_filepath.to_string_lossy()
+            );
+
+            fs::create_dir_all(output_filepath.parent().unwrap())
+                .expect("Failed to create output path.");
+            let mut writer = File::create(output_filepath).unwrap();
+            io::copy(&mut reader, &mut writer).unwrap();
+            filetime::set_file_handle_times(&writer, file_entry.file_time, file_entry.file_time)
+                .err();
+        }
     }
 }
 
@@ -118,36 +160,6 @@ pub fn list_files<R: Read + Seek>(
     }
 
     entries
-}
-
-pub fn export_files<R: Read + Seek>(
-    cabinet: &mut Cabinet<R>,
-    file_entries: &Vec<WinCECabFileEntry>,
-) {
-    for file_entry in file_entries {
-        let mut reader = cabinet.read_file(&file_entry.cab_filename).unwrap();
-        let mut output_filepath = PathBuf::from("out");
-
-        let should_expand_ce_variables = true;
-        let destination = if should_expand_ce_variables {
-            expand_ce_variables(&file_entry.destination).to_string()
-        } else {
-            file_entry.destination.to_string()
-        };
-
-        println!(
-            "Extracting {} ({} B Compression {:?}) to {}",
-            file_entry.cab_filename, file_entry.file_size, file_entry.compression, destination
-        );
-
-        output_filepath.push(destination);
-
-        fs::create_dir_all(output_filepath.parent().unwrap())
-            .expect("Failed to create output path.");
-        let mut writer = File::create(output_filepath).unwrap();
-        io::copy(&mut reader, &mut writer).unwrap();
-        filetime::set_file_handle_times(&writer, file_entry.file_time, file_entry.file_time).err();
-    }
 }
 
 fn expand_ce_variables(path: &str) -> Cow<str> {
