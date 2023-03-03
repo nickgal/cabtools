@@ -44,9 +44,9 @@ pub fn read_cab(path: PathBuf) -> Cabinet<File> {
 }
 
 pub trait CECabinet {
-    fn find_000_manifest(&self) -> Option<&FileEntry>;
-    fn read_000_manifest(&self) -> MSCE000;
-    fn list_files(&self) -> Vec<WinCECabFileEntry>;
+    fn find_000_manifest_filename(&self) -> Option<&str>;
+    fn read_000_manifest(&mut self) -> MSCE000;
+    fn list_files(&mut self) -> Vec<WinCECabFileEntry>;
     fn extract_files<P: Into<PathBuf>>(
         &mut self,
         file_entries: &[WinCECabFileEntry],
@@ -55,26 +55,27 @@ pub trait CECabinet {
 }
 
 impl<R: Read + Seek> CECabinet for Cabinet<R> {
-    fn find_000_manifest(&self) -> Option<&FileEntry> {
+    fn find_000_manifest_filename(&self) -> Option<&str> {
         for folder in self.folder_entries() {
             for file in folder.file_entries() {
                 if file.extension() == "000" {
-                    return Some(file);
+                    return Some(file.name());
                 }
             }
         }
         None
     }
 
-    fn read_000_manifest(&self) -> MSCE000 {
+    fn read_000_manifest(&mut self) -> MSCE000 {
         let manifest = self
-            .find_000_manifest()
-            .expect("Failed to locate .000 manifest.");
-        let mut file = File::open(manifest.name()).unwrap();
-        MSCE000::read(&mut file).unwrap()
+            .find_000_manifest_filename()
+            .expect("Failed to locate .000 manifest.").to_owned();
+
+        let mut reader = self.read_file(manifest.as_str()).unwrap();
+        return MSCE000::read(&mut reader).unwrap()
     }
 
-    fn list_files(&self) -> Vec<WinCECabFileEntry> {
+    fn list_files(&mut self) -> Vec<WinCECabFileEntry> {
         let msce = self.read_000_manifest();
         let mut entries = Vec::new();
 

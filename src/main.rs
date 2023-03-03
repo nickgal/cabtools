@@ -26,7 +26,7 @@ fn main() {
 
     match args.command {
         Commands::Ls { path } => {
-            let cabinet = read_cab(path);
+            let mut cabinet = read_cab(path);
             let ce_manifest = cabinet.read_000_manifest();
             let file_entries = cabinet.list_files();
 
