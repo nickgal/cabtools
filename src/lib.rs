@@ -46,6 +46,7 @@ pub fn read_cab(path: PathBuf) -> Cabinet<File> {
 pub trait CECabinet {
     fn find_000_manifest(&self) -> Option<&FileEntry>;
     fn read_000_manifest(&self) -> MSCE000;
+    fn list_files(&self) -> Vec<WinCECabFileEntry>;
     fn extract_files<P: Into<PathBuf>>(
         &mut self,
         file_entries: &[WinCECabFileEntry],
@@ -71,6 +72,41 @@ impl<R: Read + Seek> CECabinet for Cabinet<R> {
             .expect("Failed to locate .000 manifest.");
         let mut file = File::open(manifest.name()).unwrap();
         MSCE000::read(&mut file).unwrap()
+    }
+
+    fn list_files(&self) -> Vec<WinCECabFileEntry> {
+        let msce = self.read_000_manifest();
+        let mut entries = Vec::new();
+
+        for folder in self.folder_entries() {
+            for file in folder.file_entries() {
+                let file_ext = file.extension();
+                let file_path = match msce.file_mapping.get(&file_ext) {
+                    Some(path) => path,
+                    _ => match file_ext.as_ref() {
+                        "000" => "manifest.bin",
+                        "999" => "setup.dll",
+                        _ => file.name(),
+                    },
+                };
+
+                let odt = match file.datetime() {
+                    Some(pdt) => pdt.assume_utc(),
+                    _ => OffsetDateTime::now_utc(),
+                };
+                let date_time = FileTime::from_unix_time(odt.unix_timestamp(), 0);
+
+                entries.push(WinCECabFileEntry {
+                    cab_filename: file.name().to_string(),
+                    compression: folder.compression_type(),
+                    file_time: Some(date_time),
+                    file_size: file.uncompressed_size(),
+                    destination: file_path.to_string(),
+                });
+            }
+        }
+
+        entries
     }
 
     fn extract_files<P: Into<PathBuf>>(
@@ -123,43 +159,6 @@ impl FileEntryExtension for FileEntry {
             .to_string_lossy()
             .to_string()
     }
-}
-
-pub fn list_files<R: Read + Seek>(
-    cabinet: &mut Cabinet<R>,
-    msce: &MSCE000,
-) -> Vec<WinCECabFileEntry> {
-    let mut entries = Vec::new();
-
-    for folder in cabinet.folder_entries() {
-        for file in folder.file_entries() {
-            let file_ext = file.extension();
-            let file_path = match msce.file_mapping.get(&file_ext) {
-                Some(path) => path,
-                _ => match file_ext.as_ref() {
-                    "000" => "manifest.bin",
-                    "999" => "setup.dll",
-                    _ => file.name(),
-                },
-            };
-
-            let odt = match file.datetime() {
-                Some(pdt) => pdt.assume_utc(),
-                _ => OffsetDateTime::now_utc(),
-            };
-            let date_time = FileTime::from_unix_time(odt.unix_timestamp(), 0);
-
-            entries.push(WinCECabFileEntry {
-                cab_filename: file.name().to_string(),
-                compression: folder.compression_type(),
-                file_time: Some(date_time),
-                file_size: file.uncompressed_size(),
-                destination: file_path.to_string(),
-            });
-        }
-    }
-
-    entries
 }
 
 fn expand_ce_variables(path: &str) -> Cow<str> {

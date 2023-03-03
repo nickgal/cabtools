@@ -69,7 +69,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cabextract_ce"
+name = "cabtools"
 version = "0.1.0"
 dependencies = [
  "binrw",
